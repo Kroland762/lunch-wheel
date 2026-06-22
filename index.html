@@ -269,7 +269,7 @@
       </form>
       <div class="option-meta">
         <span id="optionMessage" class="option-message" role="status" aria-live="polite"></span>
-        <button id="resetOptions" class="reset-options" type="button">恢复默认</button>
+        <button id="syncOptions" class="reset-options" type="button">刷新选项</button>
       </div>
       <div class="options" id="options"></div>
     </section>
@@ -278,14 +278,7 @@
   <script>
     const defaultItems = ["平成屋", "海鲜面", "卤肉饭", "拉面", "饺子", "KFC", "麦麦", "麻辣香锅", "米线", "大米先生", "foodbowl"];
     const colors = ["#fb923c", "#facc15", "#34d399", "#60a5fa", "#a78bfa", "#f472b6", "#f87171", "#2dd4bf", "#c084fc", "#04d299" ,"#f07171"];
-    const storageKey = "lunch-wheel-items";
-    let storedItems = null;
-    try {
-      storedItems = JSON.parse(localStorage.getItem(storageKey) || "null");
-    } catch {
-      localStorage.removeItem(storageKey);
-    }
-    let items = Array.isArray(storedItems) && storedItems.length >= 2 ? storedItems : [...defaultItems];
+    let items = [...defaultItems];
 
     const canvas = document.getElementById("wheel");
     const ctx = canvas.getContext("2d");
@@ -295,7 +288,7 @@
     const optionForm = document.getElementById("optionForm");
     const optionInput = document.getElementById("optionInput");
     const optionMessage = document.getElementById("optionMessage");
-    const resetOptions = document.getElementById("resetOptions");
+    const syncOptionsButton = document.getElementById("syncOptions");
 
     const size = canvas.width;
     const cx = size / 2;
@@ -308,25 +301,12 @@
       return Math.PI * 2 / items.length;
     }
 
-    function saveItems() {
-      localStorage.setItem(storageKey, JSON.stringify(items));
-    }
-
     function renderOptions() {
       optionsEl.replaceChildren();
-      items.forEach((item, index) => {
+      items.forEach(item => {
         const chip = document.createElement("span");
         chip.className = "chip";
         chip.append(document.createTextNode(item));
-
-        const removeButton = document.createElement("button");
-        removeButton.className = "chip-remove";
-        removeButton.type = "button";
-        removeButton.textContent = "\u00d7";
-        removeButton.title = `删除${item}`;
-        removeButton.setAttribute("aria-label", `删除${item}`);
-        removeButton.dataset.index = index;
-        chip.append(removeButton);
         optionsEl.append(chip);
       });
     }
@@ -335,9 +315,27 @@
       rotation = 0;
       resultEl.textContent = "？";
       optionMessage.textContent = message;
-      saveItems();
       renderOptions();
       drawWheel();
+    }
+
+    async function syncOptions(showMessage = true) {
+      if (spinning) return;
+      syncOptionsButton.disabled = true;
+      try {
+        const response = await fetch("/api/options", { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data.items) || data.items.length < 2) {
+          throw new Error(data.error || "Invalid shared options");
+        }
+        items = data.items;
+        refreshWheel(showMessage ? `已同步 ${items.length} 个选项` : "");
+      } catch (error) {
+        console.error("Failed to sync shared options", error);
+        if (showMessage) optionMessage.textContent = "共享同步失败，暂用当前选项";
+      } finally {
+        syncOptionsButton.disabled = false;
+      }
     }
 
     function drawWheel() {
@@ -432,7 +430,7 @@
       requestAnimationFrame(animate);
     }
 
-    optionForm.addEventListener("submit", event => {
+    optionForm.addEventListener("submit", async event => {
       event.preventDefault();
       if (spinning) {
         optionMessage.textContent = "请等转盘停下再修改";
@@ -450,45 +448,36 @@
         optionInput.select();
         return;
       }
-      if (items.length >= 20) {
-        optionMessage.textContent = "最多保留 20 个选项";
-        return;
+      const submitButton = optionForm.querySelector("button[type='submit']");
+      submitButton.disabled = true;
+      optionMessage.textContent = "正在保存…";
+      try {
+        const response = await fetch("/api/options", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: value })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Save failed");
+        items = data.items;
+        optionInput.value = "";
+        refreshWheel(`已共享“${value}”`);
+      } catch (error) {
+        optionMessage.textContent = error.message || "保存失败，请稍后重试";
+      } finally {
+        submitButton.disabled = false;
+        optionInput.focus();
       }
-
-      items.push(value);
-      optionInput.value = "";
-      refreshWheel(`已添加“${value}”`);
-      optionInput.focus();
     });
 
-    optionsEl.addEventListener("click", event => {
-      const button = event.target.closest(".chip-remove");
-      if (!button) return;
-      if (spinning) {
-        optionMessage.textContent = "请等转盘停下再修改";
-        return;
-      }
-      if (items.length <= 2) {
-        optionMessage.textContent = "至少保留 2 个选项";
-        return;
-      }
-
-      const [removed] = items.splice(Number(button.dataset.index), 1);
-      refreshWheel(`已删除“${removed}”`);
-    });
-
-    resetOptions.addEventListener("click", () => {
-      if (spinning) {
-        optionMessage.textContent = "请等转盘停下再修改";
-        return;
-      }
-      items = [...defaultItems];
-      refreshWheel("已恢复默认选项");
-    });
-
+    syncOptionsButton.addEventListener("click", () => syncOptions(true));
     spinBtn.addEventListener("click", spin);
     renderOptions();
     drawWheel();
+    syncOptions(true);
+    setInterval(() => {
+      if (document.visibilityState === "visible") syncOptions(false);
+    }, 15000);
   </script>
 </body>
 </html>
