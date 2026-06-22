@@ -2,7 +2,7 @@ const BASE_TOKEN = "OKuOb0576aK0J2seAw8cnW5snTc";
 const TABLE_ID = "tblyJH47VwqfG2bm";
 const LARK_API = "https://open.feishu.cn/open-apis";
 const MAX_ITEMS = 50;
-const DEFAULT_ITEMS = ["平成屋", "海鲜面", "卤肉饭", "拉面", "饺子", "KFC", "麦麦", "麻辣香锅", "米线", "大米先生", "foodbowl"];
+const DEFAULT_ITEMS = ["平成屋", "海鲜面", "卤肉饭", "兰州拉面", "喜家德", "KFC", "麦麦", "麻辣香锅", "云南米线", "大米先生", "foodbowl"];
 
 let tokenCache = { value: "", expiresAt: 0 };
 
