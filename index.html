@@ -264,12 +264,15 @@
       <button id="spinBtn">开始转盘</button>
 
       <form class="option-editor" id="optionForm">
-        <input id="optionInput" type="text" maxlength="12" placeholder="临时加一个午餐选项" aria-label="新增午餐选项" autocomplete="off" />
+        <input id="optionInput" type="text" maxlength="12" placeholder="增加一个共享午餐选项" aria-label="新增午餐选项" autocomplete="off" />
         <button class="add-option" type="submit" aria-label="添加选项" title="添加选项">+</button>
       </form>
       <div class="option-meta">
         <span id="optionMessage" class="option-message" role="status" aria-live="polite"></span>
-        <button id="syncOptions" class="reset-options" type="button">刷新选项</button>
+        <span>
+          <button id="syncOptions" class="reset-options" type="button">刷新选项</button>
+          <button id="resetOptions" class="reset-options" type="button">恢复默认</button>
+        </span>
       </div>
       <div class="options" id="options"></div>
     </section>
@@ -289,6 +292,7 @@
     const optionInput = document.getElementById("optionInput");
     const optionMessage = document.getElementById("optionMessage");
     const syncOptionsButton = document.getElementById("syncOptions");
+    const resetOptionsButton = document.getElementById("resetOptions");
 
     const size = canvas.width;
     const cx = size / 2;
@@ -307,8 +311,39 @@
         const chip = document.createElement("span");
         chip.className = "chip";
         chip.append(document.createTextNode(item));
+        const removeButton = document.createElement("button");
+        removeButton.className = "chip-remove";
+        removeButton.type = "button";
+        removeButton.textContent = "×";
+        removeButton.setAttribute("aria-label", `停用${item}`);
+        removeButton.title = "暂时停用";
+        removeButton.addEventListener("click", () => disableOption(item, removeButton));
+        chip.append(removeButton);
         optionsEl.append(chip);
       });
+    }
+
+    async function disableOption(item, button) {
+      if (spinning) {
+        optionMessage.textContent = "请等转盘停下再修改";
+        return;
+      }
+      button.disabled = true;
+      optionMessage.textContent = `正在停用“${item}”…`;
+      try {
+        const response = await fetch("/api/options", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: item })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Disable failed");
+        items = data.items;
+        refreshWheel(`已停用“${item}”`);
+      } catch (error) {
+        optionMessage.textContent = error.message || "停用失败，请稍后重试";
+        button.disabled = false;
+      }
     }
 
     function refreshWheel(message) {
@@ -471,6 +506,30 @@
     });
 
     syncOptionsButton.addEventListener("click", () => syncOptions(true));
+    resetOptionsButton.addEventListener("click", async () => {
+      if (spinning) {
+        optionMessage.textContent = "请等转盘停下再修改";
+        return;
+      }
+      if (!confirm("恢复默认选项？后来新增的共享选项会被暂时停用。")) return;
+      resetOptionsButton.disabled = true;
+      optionMessage.textContent = "正在恢复默认…";
+      try {
+        const response = await fetch("/api/options", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "reset" })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Reset failed");
+        items = data.items;
+        refreshWheel("已恢复默认选项");
+      } catch (error) {
+        optionMessage.textContent = error.message || "恢复失败，请稍后重试";
+      } finally {
+        resetOptionsButton.disabled = false;
+      }
+    });
     spinBtn.addEventListener("click", spin);
     renderOptions();
     drawWheel();
