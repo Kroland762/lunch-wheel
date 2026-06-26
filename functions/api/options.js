@@ -2,7 +2,19 @@ const BASE_TOKEN = "OKuOb0576aK0J2seAw8cnW5snTc";
 const TABLE_ID = "tblyJH47VwqfG2bm";
 const LARK_API = "https://open.feishu.cn/open-apis";
 const MAX_ITEMS = 50;
-const DEFAULT_ITEMS = ["平成屋", "海鲜面", "卤肉饭", "兰州拉面", "喜家德", "KFC", "麦麦", "麻辣香锅", "云南米线", "大米先生", "foodbowl"];
+const DEFAULT_ITEMS = [
+  { name: "平成屋", tags: [] },
+  { name: "海鲜面", tags: ["面"] },
+  { name: "卤肉饭", tags: [] },
+  { name: "兰州拉面", tags: ["面"] },
+  { name: "喜家德", tags: [] },
+  { name: "KFC", tags: ["老板不宜"] },
+  { name: "麦麦", tags: ["老板不宜"] },
+  { name: "麻辣香锅", tags: ["辣"] },
+  { name: "云南米线", tags: ["辣", "老板不宜"] },
+  { name: "大米先生", tags: ["老板不宜"] },
+  { name: "foodbowl", tags: [] },
+];
 
 let tokenCache = { value: "", expiresAt: 0 };
 
@@ -62,6 +74,7 @@ async function listRecords(env) {
   const nameIndex = data.fields?.indexOf("选项名称") ?? -1;
   const enabledIndex = data.fields?.indexOf("启用") ?? -1;
   const statusIndex = data.fields?.indexOf("状态") ?? -1;
+  const tagsIndex = data.fields?.indexOf("标签") ?? -1;
 
   if (nameIndex < 0 || enabledIndex < 0 || statusIndex < 0) {
     throw new Error("Required Base fields are missing");
@@ -71,16 +84,17 @@ async function listRecords(env) {
     id: data.record_id_list?.[index] || "",
     name: String(row[nameIndex] || "").trim(),
     enabled: row[enabledIndex] === true,
-    normal: row[statusIndex] === "正常" || (Array.isArray(row[statusIndex]) && row[statusIndex].includes("正常"))
+    normal: row[statusIndex] === "正常" || (Array.isArray(row[statusIndex]) && row[statusIndex].includes("正常")),
+    tags: tagsIndex >= 0 && Array.isArray(row[tagsIndex]) ? row[tagsIndex] : []
   })).filter(record => record.id && record.name);
 }
 
-function enabledItems(records) {
+function activeItems(records) {
   const seen = new Set();
   return records
     .filter(record => record.enabled && record.normal)
-    .map(record => record.name)
-    .filter(name => !seen.has(name.toLocaleLowerCase()) && seen.add(name.toLocaleLowerCase()))
+    .map(record => ({ name: record.name, tags: record.tags }))
+    .filter(item => !seen.has(item.name.toLocaleLowerCase()) && seen.add(item.name.toLocaleLowerCase()))
     .slice(0, MAX_ITEMS);
 }
 
@@ -107,7 +121,9 @@ async function createRecord(env, name, source = "Cloudflare 网页") {
 
 async function resetOptions(env) {
   const records = await listRecords(env);
-  const defaults = new Set(DEFAULT_ITEMS.map(item => item.toLocaleLowerCase()));
+  const defaults = new Map(
+    DEFAULT_ITEMS.map(item => [item.name.toLocaleLowerCase(), item.tags])
+  );
   const existing = new Set(records.map(record => record.name.toLocaleLowerCase()));
 
   for (const record of records) {
@@ -117,9 +133,9 @@ async function resetOptions(env) {
     }
   }
 
-  for (const name of DEFAULT_ITEMS) {
-    if (!existing.has(name.toLocaleLowerCase())) {
-      await createRecord(env, name, "恢复默认");
+  for (const item of DEFAULT_ITEMS) {
+    if (!existing.has(item.name.toLocaleLowerCase())) {
+      await createRecord(env, item.name, "恢复默认");
     }
   }
 
@@ -128,7 +144,7 @@ async function resetOptions(env) {
 
 export async function onRequestGet({ env }) {
   try {
-    return json({ items: enabledItems(await listRecords(env)) });
+    return json({ items: activeItems(await listRecords(env)) });
   } catch (error) {
     console.error("Failed to list lunch options", error);
     return json({ error: "暂时无法读取共享选项" }, 502);
@@ -152,7 +168,7 @@ export async function onRequestPost({ request, env }) {
     }
 
     const records = await listRecords(env);
-    const currentItems = enabledItems(records);
+    const currentItems = activeItems(records);
     const existing = records.find(record => record.name.toLocaleLowerCase() === name.toLocaleLowerCase());
     if (existing?.enabled && existing.normal) {
       return json({ error: "这个选项已经有了", items: currentItems }, 409);
@@ -167,7 +183,7 @@ export async function onRequestPost({ request, env }) {
       await createRecord(env, name);
     }
 
-    return json({ item: name, items: [...currentItems, name] }, 201);
+    return json({ item: { name, tags: [] }, items: [...currentItems, { name, tags: [] }] }, 201);
   } catch (error) {
     console.error("Failed to create lunch option", error);
     return json({ error: "暂时无法保存共享选项" }, 502);
@@ -183,14 +199,14 @@ export async function onRequestDelete({ request, env }) {
     const body = await request.json();
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const records = await listRecords(env);
-    const currentItems = enabledItems(records);
+    const currentItems = activeItems(records);
     const record = records.find(item => item.enabled && item.normal && item.name.toLocaleLowerCase() === name.toLocaleLowerCase());
 
     if (!record) return json({ error: "这个选项已经停用了", items: currentItems }, 404);
     if (currentItems.length <= 2) return json({ error: "至少保留两个选项", items: currentItems }, 409);
 
     await updateRecord(env, record.id, { "启用": false });
-    return json({ items: currentItems.filter(item => item.toLocaleLowerCase() !== name.toLocaleLowerCase()) });
+    return json({ items: currentItems.filter(item => item.name.toLocaleLowerCase() !== name.toLocaleLowerCase()) });
   } catch (error) {
     console.error("Failed to disable lunch option", error);
     return json({ error: "暂时无法停用共享选项" }, 502);

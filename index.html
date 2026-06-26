@@ -146,6 +146,96 @@
     button:active { transform: translateY(1px) scale(.99); }
     button:disabled { cursor: not-allowed; filter: grayscale(.25); opacity: .75; }
 
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-bottom: 14px;
+    }
+
+    .filter-btn {
+      flex: 1 0 auto;
+      min-width: 0;
+      border: 2px solid;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .2s ease;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      touch-action: manipulation;
+    }
+
+    .filter-btn:active {
+      transform: scale(.96);
+    }
+
+    .filter-off {
+      background: white;
+      border-color: #e5e7eb;
+      color: #6b7280;
+    }
+
+    .filter-off:hover {
+      border-color: #d1d5db;
+      background: #f9fafb;
+    }
+
+    .filter-on {
+      background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+      border-color: var(--primary);
+      color: white;
+      box-shadow: 0 2px 10px rgba(234, 88, 12, .28);
+      transform: translateY(-1px);
+    }
+
+    .filter-on:active {
+      transform: scale(.96) translateY(0);
+    }
+
+    .filter-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px;
+      padding: 0 8px;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    @media (min-width: 601px) and (max-width: 820px) {
+      /* Tablet: buttons 3-col, full width each row */
+      .filter-btn { padding: 11px 14px; font-size: 14px; }
+    }
+
+    @media (max-width: 600px) {
+      .filters { gap: 6px; margin-bottom: 12px; }
+      .filter-btn {
+        flex: 1 0 calc(50% - 10px);
+        padding: 12px 10px;
+        font-size: 14px;
+        text-align: center;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .filter-count {
+        flex: 0 0 auto;
+        width: 44px;
+        padding: 0 4px;
+        font-size: 13px;
+      }
+    }
+
+    @media (max-width: 360px) {
+      .filter-btn { flex: 1 0 100%; }
+    }
+
     .options {
       margin-top: 18px;
       display: flex;
@@ -261,6 +351,13 @@
         <div id="result" class="food">？</div>
       </div>
 
+      <div class="filters">
+          <button class="filter-btn filter-off" id="filterNoSpicy" data-filter="不吃辣" type="button">🌶️ 不吃辣</button>
+          <button class="filter-btn filter-off" id="filterBossHere" data-filter="老板在" type="button">👔 老板在</button>
+          <button class="filter-btn filter-off" id="filterNoNoodles" data-filter="不吃面" type="button">🍜 不吃面</button>
+          <span class="filter-count" id="filterCount"></span>
+        </div>
+
       <button id="spinBtn">开始转盘</button>
 
       <form class="option-editor" id="optionForm">
@@ -279,8 +376,20 @@
   </main>
 
   <script>
-    const defaultItems = ["平成屋", "海鲜面", "卤肉饭", "兰州拉面", "喜家德", "KFC", "麦麦", "麻辣香锅", "云南米线", "大米先生", "foodbowl"];
-    const colors = ["#fb923c", "#facc15", "#34d399", "#60a5fa", "#a78bfa", "#f472b6", "#f87171", "#2dd4bf", "#c084fc", "#04d299" ,"#f07171"];
+    const defaultItems = [
+      { name: "平成屋", tags: [] },
+      { name: "海鲜面", tags: ["面"] },
+      { name: "卤肉饭", tags: [] },
+      { name: "兰州拉面", tags: ["面"] },
+      { name: "喜家德", tags: [] },
+      { name: "KFC", tags: ["老板不宜"] },
+      { name: "麦麦", tags: ["老板不宜"] },
+      { name: "麻辣香锅", tags: ["辣"] },
+      { name: "云南米线", tags: ["辣", "老板不宜"] },
+      { name: "大米先生", tags: ["老板不宜"] },
+      { name: "foodbowl", tags: [] },
+    ];
+    const colors = ["#fb923c", "#facc15", "#34d399", "#60a5fa", "#a78bfa", "#f472b6", "#f87171", "#2dd4bf", "#c084fc", "#04d299" ,"#f07171", "#f97316", "#eab308"];
     let items = [...defaultItems];
 
     const canvas = document.getElementById("wheel");
@@ -293,6 +402,12 @@
     const optionMessage = document.getElementById("optionMessage");
     const syncOptionsButton = document.getElementById("syncOptions");
     const resetOptionsButton = document.getElementById("resetOptions");
+    const filterBtns = {
+      不吃辣: document.getElementById("filterNoSpicy"),
+      老板在: document.getElementById("filterBossHere"),
+      不吃面: document.getElementById("filterNoNoodles"),
+    };
+    const activeFilters = { 不吃辣: false, 老板在: false, 不吃面: false };
 
     const size = canvas.width;
     const cx = size / 2;
@@ -305,23 +420,69 @@
       return Math.PI * 2 / items.length;
     }
 
+    function getFilteredItems() {
+      return items.filter(item => {
+        if (activeFilters.不吃辣 && item.tags.includes("辣")) return false;
+        if (activeFilters.老板在 && item.tags.includes("老板不宜")) return false;
+        if (activeFilters.不吃面 && item.tags.includes("面")) return false;
+        return true;
+      });
+    }
+
+    function applyFilterCount() {
+      const filtered = getFilteredItems();
+      const total = items.length;
+      document.getElementById("filterCount").textContent = `${filtered.length}/${total}`;
+      return filtered;
+    }
+
+    function updateFilterButton(btn) {
+      const key = btn.dataset.filter;
+      const active = activeFilters[key];
+      btn.classList.toggle("filter-on", active);
+      btn.classList.toggle("filter-off", !active);
+    }
+
     function renderOptions() {
       optionsEl.replaceChildren();
-      items.forEach(item => {
+      const displayItems = applyFilterCount();
+      displayItems.forEach(item => {
         const chip = document.createElement("span");
         chip.className = "chip";
-        chip.append(document.createTextNode(item));
+        chip.append(document.createTextNode(item.name));
         const removeButton = document.createElement("button");
         removeButton.className = "chip-remove";
         removeButton.type = "button";
         removeButton.textContent = "×";
-        removeButton.setAttribute("aria-label", `停用${item}`);
+        removeButton.setAttribute("aria-label", `停用${item.name}`);
         removeButton.title = "暂时停用";
-        removeButton.addEventListener("click", () => disableOption(item, removeButton));
+        removeButton.addEventListener("click", () => disableOption(item.name, removeButton));
         chip.append(removeButton);
         optionsEl.append(chip);
       });
     }
+
+    Object.values(filterBtns).forEach(btn => {
+      btn.addEventListener("click", () => {
+        if (spinning) {
+          optionMessage.textContent = "请等转盘停下再操作";
+          return;
+        }
+        const key = btn.dataset.filter;
+        activeFilters[key] = !activeFilters[key];
+        updateFilterButton(btn);
+        rotation = 0;
+        resultEl.textContent = "？";
+        const filtered = applyFilterCount();
+        if (filtered.length < 2) {
+          optionMessage.textContent = "筛选后选项不足 2 个，请调整筛选条件";
+        } else {
+          optionMessage.textContent = "";
+        }
+        renderOptions();
+        drawWheel();
+      });
+    });
 
     async function disableOption(item, button) {
       if (spinning) {
@@ -338,7 +499,7 @@
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Disable failed");
-        items = data.items;
+        items = data.items.map(n => typeof n === "string" ? { name: n, tags: [] } : n);
         refreshWheel(`已停用“${item}”`);
       } catch (error) {
         optionMessage.textContent = error.message || "停用失败，请稍后重试";
@@ -363,7 +524,7 @@
         if (!response.ok || !Array.isArray(data.items) || data.items.length < 2) {
           throw new Error(data.error || "Invalid shared options");
         }
-        items = data.items;
+        items = data.items.map(n => typeof n === "string" ? { name: n, tags: [] } : n);
         refreshWheel(showMessage ? `已同步 ${items.length} 个选项` : "");
       } catch (error) {
         console.error("Failed to sync shared options", error);
@@ -374,13 +535,27 @@
     }
 
     function drawWheel() {
-      const slice = sliceAngle();
+      const drawItems = getFilteredItems();
+      if (drawItems.length < 2) {
+        ctx.clearRect(0, 0, size, size);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.fillStyle = "#d1d5db";
+        ctx.font = "bold 48px -apple-system, 'PingFang SC', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("选项不足", 0, 0);
+        ctx.restore();
+        return;
+      }
+
+      const slice = Math.PI * 2 / drawItems.length;
       ctx.clearRect(0, 0, size, size);
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(rotation);
 
-      for (let i = 0; i < items.length; i++) {
+      for (let i = 0; i < drawItems.length; i++) {
         const start = i * slice;
         const end = start + slice;
 
@@ -403,7 +578,7 @@
         ctx.font = "bold 46px -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif";
         ctx.shadowColor = "rgba(255,255,255,.75)";
         ctx.shadowBlur = 4;
-        ctx.fillText(items[i], radius - 54, 0);
+        ctx.fillText(drawItems[i].name, radius - 54, 0);
         ctx.restore();
       }
 
@@ -421,22 +596,28 @@
     }
 
     function selectedIndex() {
-      const slice = sliceAngle();
-      // 指针在正上方，即画布角度 -90°。
+      const drawItems = getFilteredItems();
+      const slice = Math.PI * 2 / drawItems.length;
       const pointerAngle = (Math.PI * 1.5 - rotation) % (Math.PI * 2);
       const normalized = (pointerAngle + Math.PI * 2) % (Math.PI * 2);
-      return Math.floor(normalized / slice) % items.length;
+      return Math.floor(normalized / slice) % drawItems.length;
     }
 
     function spin() {
       if (spinning) return;
-      const slice = sliceAngle();
+      const drawItems = getFilteredItems();
+      if (drawItems.length < 2) {
+        optionMessage.textContent = "选项不足 2 个，无法转盘";
+        return;
+      }
+
+      const slice = Math.PI * 2 / drawItems.length;
       spinning = true;
       spinBtn.disabled = true;
       resultEl.textContent = "转着呢…";
 
       const startRotation = rotation;
-      const winner = Math.floor(Math.random() * items.length);
+      const winner = Math.floor(Math.random() * drawItems.length);
       const winnerCenter = winner * slice + slice / 2;
       const targetPointer = Math.PI * 1.5;
       const currentFullTurns = Math.ceil(startRotation / (Math.PI * 2));
@@ -456,7 +637,7 @@
           rotation = targetRotation % (Math.PI * 2);
           drawWheel();
           const idx = selectedIndex();
-          resultEl.textContent = items[idx];
+          resultEl.textContent = drawItems[idx].name;
           spinBtn.disabled = false;
           spinning = false;
         }
@@ -478,7 +659,7 @@
         optionInput.focus();
         return;
       }
-      if (items.some(item => item.toLowerCase() === value.toLowerCase())) {
+      if (items.some(item => item.name.toLowerCase() === value.toLowerCase())) {
         optionMessage.textContent = "这个选项已经有了";
         optionInput.select();
         return;
@@ -494,7 +675,7 @@
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Save failed");
-        items = data.items;
+        items = data.items.map(n => typeof n === "string" ? { name: n, tags: [] } : n);
         optionInput.value = "";
         refreshWheel(`已共享“${value}”`);
       } catch (error) {
@@ -522,7 +703,7 @@
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Reset failed");
-        items = data.items;
+        items = data.items.map(n => typeof n === "string" ? { name: n, tags: [] } : n);
         refreshWheel("已恢复默认选项");
       } catch (error) {
         optionMessage.textContent = error.message || "恢复失败，请稍后重试";
